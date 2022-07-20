@@ -11,12 +11,13 @@ import
   std/[tables, typetraits, strformat],
   stew/shims/macros, stew/[byteutils, bitops2, objects], stint, nimcrypto/hash,
   serialization/[object_serialization, errors],
-  json_serialization,
   "."/[bitseqs]
 
-from nimcrypto/utils import fromHex  # needed to disambiguate properly
+when not defined(lightClientEmbedded):
+  import json_serialization
 
-export stint, bitseqs, json_serialization
+from nimcrypto/utils import fromHex  # needed to disambiguate properly
+export stint, bitseqs
 
 const
   offsetSize* = 4
@@ -567,35 +568,39 @@ template enumerateSubFields*(holder, fieldVar, body: untyped) =
 method formatMsg*(
   err: ref SszSizeMismatchError,
   filename: string): string {.gcsafe, raises: [Defect].} =
-  try:
-    &"SSZ size mismatch, element {err.elementSize}, actual {err.actualSszSize}, type {err.deserializedType}, file {filename}"
-  except CatchableError:
+  when defined(lightClientEmbedded):
     "SSZ size mismatch"
-
-template readValue*(reader: var JsonReader, value: var List) =
-  when type(value[0]) is byte:
-    value = type(value)(utils.fromHex(reader.readValue(string)))
   else:
-    value = type(value)(readValue(reader, seq[type value[0]]))
+    try:
+      &"SSZ size mismatch, element {err.elementSize}, actual {err.actualSszSize}, type {err.deserializedType}, file {filename}"
+    except CatchableError:
+      "SSZ size mismatch"
 
-template writeValue*(writer: var JsonWriter, value: List) =
-  when type(value[0]) is byte:
-    writeValue(writer, to0xHex(distinctBase(value)))
-  else:
-    writeValue(writer, asSeq value)
+when not defined(lightClientEmbedded):
+  template readValue*(reader: var JsonReader, value: var List) =
+    when type(value[0]) is byte:
+      value = type(value)(utils.fromHex(reader.readValue(string)))
+    else:
+      value = type(value)(readValue(reader, seq[type value[0]]))
 
-proc writeValue*(writer: var JsonWriter, value: HashList)
+  template writeValue*(writer: var JsonWriter, value: List) =
+    when type(value[0]) is byte:
+      writeValue(writer, to0xHex(distinctBase(value)))
+    else:
+      writeValue(writer, asSeq value)
+
+  proc writeValue*(writer: var JsonWriter, value: HashList)
+                  {.raises: [IOError, SerializationError, Defect].} =
+    writeValue(writer, value.data)
+
+  proc readValue*(reader: var JsonReader, value: var HashList)
                 {.raises: [IOError, SerializationError, Defect].} =
-  writeValue(writer, value.data)
+    value.resetCache()
+    readValue(reader, value.data)
 
-proc readValue*(reader: var JsonReader, value: var HashList)
-               {.raises: [IOError, SerializationError, Defect].} =
-  value.resetCache()
-  readValue(reader, value.data)
+  template readValue*(reader: var JsonReader, value: var BitList) =
+    type T = type(value)
+    value = T readValue(reader, BitSeq)
 
-template readValue*(reader: var JsonReader, value: var BitList) =
-  type T = type(value)
-  value = T readValue(reader, BitSeq)
-
-template writeValue*(writer: var JsonWriter, value: BitList) =
-  writeValue(writer, BitSeq value)
+  template writeValue*(writer: var JsonWriter, value: BitList) =
+    writeValue(writer, BitSeq value)

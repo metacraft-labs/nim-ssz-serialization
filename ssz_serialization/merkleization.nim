@@ -18,9 +18,11 @@ import
   serialization/testing/tracing,
   "."/[bitseqs, codec, types]
 
+from serialization/object_serialization import totalSerializedFields
+
 const PREFER_BLST_SHA256* {.booldefine.} = true
 
-when PREFER_BLST_SHA256:
+when PREFER_BLST_SHA256 and not defined(lightClientEmbedded):
   import blscurve
   when BLS_BACKEND == BLST:
     const USE_BLST_SHA256 = true
